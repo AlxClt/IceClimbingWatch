@@ -60,7 +60,7 @@ function buildModel(daily) {
           fl: niceDom(ext(d => d.flmin, Math.min), ext(d => d.flmax, Math.max), 500),
           precip: niceDom(0, ext(d => d.p, Math.max), 10),
           night: [0, Math.max(5, ext(d => (d.clear ?? 0) + (d.partial ?? 0) + (d.cloudy ?? 0), Math.max))] };
-  document.getElementById("sub").textContent = `${fmtD(DAYS[0])} to ${fmtD(DAYS[DAYS.length - 1])} ${DAYS[0].slice(0, 4)}`;
+  document.getElementById("sub").textContent = `Updated daily - current view from ${fmtD(DAYS[0])} to ${fmtD(DAYS[DAYS.length - 1])} ${DAYS[0].slice(0, 4)}`;
 }
 const ticks = (d, step) => { const t = []; for (let v = d[0]; v <= d[1] + 1e-9; v += step) t.push(v); return t; };
 const seriesFor = (locId, alt) => BYKEY[locId + ":" + (alt === "village" ? LOC[locId].ground : alt)] || null;
