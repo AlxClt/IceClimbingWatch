@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ice-climbing weather — last 21 days</title>
+<!-- Template: loads data/v_series_daily_21d.csv, data/v_series_summary_21d.csv and data/basemap.json (see README). Serve over HTTP; file:// blocks fetch. -->
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e3e2dd;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --grid: #ebeae6; --axis: #c9c8c2;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --band: #b7d3f6; --line: #1c5cab;
+  --o1: #86b6ef; --o2: #3987e5; --o3: #184f95;
+  --hover: rgba(11,11,11,.06); --tip-bg: #0b0b0b; --tip-fg: #f0efec;
+  --btn-on-bg: #0b0b0b; --btn-on-fg: #fcfcfb;
+  --relief-lo: #f3f1eb; --relief-hi: #8a857a; --border-line: #6b6a65;
+  --pin: #0b0b0b; --pin-off: #fcfcfb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2b;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #96958c;
+    --grid: #262624; --axis: #45453f;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --band: #1c5cab; --line: #86b6ef;
+    --o1: #184f95; --o2: #3987e5; --o3: #9ec5f4;
+    --hover: rgba(240,239,236,.07); --tip-bg: #f0efec; --tip-fg: #0b0b0b;
+    --btn-on-bg: #f0efec; --btn-on-fg: #1a1a19;
+    --relief-lo: #1c1c1a; --relief-hi: #6b685f; --border-line: #a3a29a;
+    --pin: #f0efec; --pin-off: #1a1a19;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-0: #121211; --surface-1: #1a1a19; --border: #2e2e2b;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #96958c;
+  --grid: #262624; --axis: #45453f;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+  --band: #1c5cab; --line: #86b6ef;
+  --o1: #184f95; --o2: #3987e5; --o3: #9ec5f4;
+  --hover: rgba(240,239,236,.07); --tip-bg: #f0efec; --tip-fg: #0b0b0b;
+  --btn-on-bg: #f0efec; --btn-on-fg: #1a1a19;
+  --relief-lo: #1c1c1a; --relief-hi: #6b685f; --border-line: #a3a29a;
+  --pin: #f0efec; --pin-off: #1a1a19;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.viz-root { background: var(--surface-0); color: var(--text-primary); min-height: 100vh;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 20px clamp(12px, 3vw, 32px) 40px; }
+.wrap { max-width: 1180px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 4px; font-weight: 650; letter-spacing: -.01em; }
+.sub { color: var(--text-secondary); margin: 0 0 14px; }
+.top { display: grid; grid-template-columns: minmax(0, 560px) minmax(240px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 760px) { .top { grid-template-columns: 1fr; } }
+.mapcard { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 8px; position: relative; }
+.map { position: relative; width: 100%; overflow: hidden; border-radius: 6px; }
+.map canvas, .map svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.map svg { overflow: hidden; }
+.pin { cursor: pointer; outline: none; }
+.pin circle.hit { fill: transparent; }
+.pin circle.dot { stroke: var(--pin); stroke-width: 2; fill: var(--pin-off); }
+.pin.on circle.dot { fill: var(--pin); }
+.pin text.num { fill: var(--pin-off); font-size: 11px; font-weight: 700; pointer-events: none; }
+.pin text.lbl { font-size: 12.5px; font-weight: 600; fill: var(--text-primary); paint-order: stroke; stroke: var(--surface-1); stroke-width: 3.5px; stroke-linejoin: round; }
+.pin:hover circle.dot, .pin:focus-visible circle.dot { stroke-width: 3; }
+.pin:focus-visible circle.hit { stroke: var(--s1); stroke-width: 2; }
+.maptxt { font-size: 11px; fill: var(--text-muted); }
+.scale { font-size: 11px; fill: var(--text-muted); }
+.side { display: flex; flex-direction: column; gap: 14px; }
+.panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.panel h2 { font-size: 14px; margin: 0 0 8px; }
+.sel { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sel li { display: flex; align-items: center; gap: 8px; }
+.sel .badge { width: 20px; height: 20px; border-radius: 50%; background: var(--pin); color: var(--pin-off); font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; flex: none; }
+.sel .meta { color: var(--text-muted); font-size: 12.5px; }
+.sel button { margin-left: auto; font: inherit; font-size: 12px; border: 1px solid var(--axis); background: var(--surface-1); color: var(--text-secondary); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.empty { color: var(--text-muted); }
+.msg { color: var(--s2); font-size: 12.5px; min-height: 18px; margin-top: 6px; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-weight: 600; border: 0; background: var(--surface-1); color: var(--text-primary); padding: 7px 11px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--axis); }
+.seg button[aria-checked="true"] { background: var(--btn-on-bg); color: var(--btn-on-fg); }
+.seg button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
+.hint { color: var(--text-muted); font-size: 12.5px; margin-top: 8px; }
+.bar { position: sticky; top: 0; z-index: 5; background: var(--surface-0); padding: 8px 0; margin-top: 18px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.bar .lbl { color: var(--text-secondary); font-weight: 600; }
+.bar .chips { display: flex; gap: 10px; flex-wrap: wrap; color: var(--text-secondary); font-size: 12.5px; }
+section { margin-top: 24px; }
+h2.s { font-size: 16px; margin: 0 0 2px; font-weight: 650; }
+.desc { color: var(--text-secondary); margin: 0 0 8px; font-size: 13px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.sw.line { height: 3px; border-radius: 2px; }
+.sw.dash { height: 0; border-top: 2px dashed var(--s2); border-radius: 0; width: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 12px 6px; min-width: 0; }
+.card h3 { font-size: 14px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card h3 .badge { width: 20px; height: 20px; border-radius: 50%; background: var(--pin); color: var(--pin-off); font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+.card .k { font-weight: 500; color: var(--text-secondary); font-size: 12.5px; margin: 2px 0 0; }
+.card .cell { font-size: 11.5px; color: var(--text-muted); margin: 1px 0 4px; }
+.card .na { color: var(--text-muted); font-size: 13px; padding: 30px 4px 36px; }
+.chart { width: 100%; }
+.chart svg { display: block; overflow: visible; }
+.chart text { font-size: 11px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.chart .ttl { fill: var(--text-secondary); font-weight: 600; }
+#tip { position: fixed; pointer-events: none; z-index: 20; background: var(--tip-bg); color: var(--tip-fg); padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.45; opacity: 0; transition: opacity .08s; max-width: 260px; font-variant-numeric: tabular-nums; }
+#tip b { font-weight: 650; }
+#tip .r { display: flex; justify-content: space-between; gap: 14px; }
+details { margin-top: 28px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+summary { cursor: pointer; font-weight: 650; }
+.tables { display: grid; gap: 18px; margin-top: 10px; }
+.tblwrap { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; width: 100%; }
+caption { text-align: left; font-weight: 650; padding: 4px 0 6px; }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--grid); text-align: right; white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+.notes { color: var(--text-secondary); font-size: 13px; }
+.notes li { margin: 4px 0; }
+.notes code { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+  <h1>Ice-climbing weather: last 21 days</h1>
+  <p class="sub" id="sub">Loading data…</p>
+  <div class="panel" id="loaderr" hidden style="border-color:var(--s2)"></div>
+
+  <div class="top">
+    <div class="mapcard" id="mapcard">
+      <div class="map" id="map" role="group" aria-label="Map of the sites; activate a site to select or deselect it">
+        <canvas id="relief" aria-hidden="true"></canvas>
+        <svg id="mapsvg"></svg>
+      </div>
+    </div>
+    <div class="side">
+      <div class="panel" id="selpanel">
+        <h2>Selected sites (max 3)</h2>
+        <ul class="sel" id="sellist"></ul>
+        <div class="msg" id="msg" role="status" aria-live="polite"></div>
+        <div class="hint">Click a site on the map to select it; click again to deselect.</div>
+      </div>
+      <div class="panel">
+        <h2>Altitude</h2>
+        <div class="seg" role="radiogroup" id="altSeg" aria-label="Altitude"></div>
+        <div class="hint">Village = each site's own village altitude. Other options are the altitudes present in the data; a site without a series there says so. Scales are fixed across sites and altitudes.</div>
+        <div class="hint" id="srcnote"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar" id="bar"><span class="lbl">Showing</span><span class="chips" id="chips"></span></div>
+
+  <section id="sec-temp">
+    <h2 class="s">Air temperature</h2>
+    <p class="desc">Daily min–max range (2 m) and hours per day above 0 °C, at the series altitude. Days are local (each site's time zone); a day can have 23 or 25 hours around clock changes.</p>
+    <div class="legend"><span><i class="sw" style="background:var(--s1)"></i>Daily min–max</span><span><i class="sw" style="background:var(--s2)"></i>Hours above 0 °C</span></div>
+    <div class="grid" data-kind="temp"></div>
+  </section>
+
+  <section id="sec-fl">
+    <h2 class="s">Freezing level (0 °C isotherm)</h2>
+    <p class="desc">Daily range and mean of the 0 °C level, m a.s.l.; dashed line = the series altitude. Lower chart: freezing hours at that altitude counted two ways. Bars = hours with the freezing level below it (free atmosphere); ticks = hours with 2 m air temperature ≤ 0 °C. A tick well above its bar suggests a valley cold pool, or a mismatch between the lapse-rate correction and the model profile.</p>
+    <div class="legend"><span><i class="sw" style="background:var(--band)"></i>Daily min–max</span><span><i class="sw line" style="background:var(--line)"></i>Daily mean</span><span><i class="sw dash"></i>Series altitude</span><span><i class="sw" style="background:var(--s1)"></i>h 0 °C level below altitude</span><span><i class="sw" style="background:var(--s2);height:4px"></i>h air ≤ 0 °C</span></div>
+    <div class="grid" data-kind="fl"></div>
+  </section>
+
+  <section id="sec-precip">
+    <h2 class="s">Precipitation</h2>
+    <p class="desc">Daily total (hours ending in the local day), split into liquid (rain + showers) and solid (snow water equivalent = total − liquid), mm. Shown at the <b>grid cell's altitude</b>: precipitation and its rain/snow split are not adjusted to the requested altitude.</p>
+    <div class="legend"><span><i class="sw" style="background:var(--s1)"></i>Rain (mm)</span><span><i class="sw" style="background:var(--s3)"></i>Snow, water equivalent (mm)</span></div>
+    <div class="grid" data-kind="precip"></div>
+  </section>
+
+  <section id="sec-night">
+    <h2 class="s">Night sky</h2>
+    <p class="desc">Night hours (sun below horizon, from 12:00 on the date shown to 12:00 the next day) by total cloud cover: clear ≤ 25 %, partial 25–75 %, cloudy ≥ 75 %. Shown at the <b>grid cell's altitude</b>: cloud cover is not adjusted to the requested altitude.</p>
+    <div class="legend"><span><i class="sw" style="background:var(--o1)"></i>Clear</span><span><i class="sw" style="background:var(--o2)"></i>Partial</span><span><i class="sw" style="background:var(--o3)"></i>Cloudy</span></div>
+    <div class="grid" data-kind="night"></div>
+  </section>
+
+  <details id="tbl">
+    <summary>Daily values table (selected sites, selected altitude)</summary>
+    <div class="tables" id="tables"></div>
+  </details>
+
+  <details id="method">
+    <summary>Method &amp; caveats</summary>
+    <ul class="notes">
+      <li><b>Data:</b> <code>data/v_series_daily_21d.csv</code> (daily rows, one per series and local day) and <code>data/v_series_summary_21d.csv</code> (one row per series: the card headlines). Both are dumps of the SQLite views of the same names; each series covers its own last 21 local days.</li>
+      <li><b>Day windows:</b> instantaneous fields use local [00:00, 24:00); precipitation uses hours ending in (00:00, 24:00]; nights run [12:00 d, 12:00 d+1) with the sun below the horizon.</li>
+      <li><b>Altitudes:</b> temperature is lapse-rate adjusted to the series altitude; precipitation, its rain/snow split and cloud cover come unchanged from the model grid cell, so those cards show the grid-cell altitude (<code>point_elevation_m</code>).</li>
+      <li><b>Headlines</b> are ratios of 21-day totals; the freezing-level and night-cloud means are hour-weighted (see the view definition).</li>
+      <li>Only <code>type = 'forecast'</code> series are charted; other rows are ignored and counted below the altitude buttons.</li>
+      <li><b>Basemap:</b> <code>data/basemap.json</code>: terrain from the Open-Meteo elevation API (0.05° grid, 80 m steps), borders from Natural Earth 1:10m. Sites outside its extent are listed but not drawn.</li>
+    </ul>
+  </details>
+</div>
+<div id="tip" role="status" aria-live="polite"></div>
+</div>
+
+<script>
+"use strict";
+const DATA_DAILY = "data/v_series_daily_21d.csv";
+const DATA_SUMMARY = "data/v_series_summary_21d.csv";
+const DATA_BASEMAP = "data/basemap.json";
+const MAX_SELECTED = 3;
+const DEFAULT_SELECTED_NAMES = ["Chamonix", "Cogne", "Kandersteg"];   // used when present in the data
+
+// ---- CSV (RFC 4180: quoted fields, "" escapes, CRLF/LF) -------------------------------
+function parseCSV(text) {
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; }
+    else f += c;
+  }
+  if (f !== "" || row.length) { row.push(f); rows.push(row); }
+  const head = rows.shift().map(h => h.trim());
+  return rows.filter(r => r.length > 1 || r[0] !== "").map(r => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
+}
+const TEXT_COLS = new Set(["location_name", "country", "timezone", "type", "source_name", "source_point_id", "model", "date_local", "first_date", "last_date"]);
+function typed(o) { const t = {}; for (const [k, v] of Object.entries(o)) t[k] = TEXT_COLS.has(k) ? (v === "" ? null : v) : (v === "" ? null : Number(v)); return t; }
+function need(rows, cols, file) { const miss = cols.filter(c => !(c in (rows[0] || {}))); if (miss.length) throw new Error(`${file}: missing column(s) ${miss.join(", ")}`); }
+
+// ---- globals filled by init() -------------------------------------------------------------------
+let LOCS = [], LOC = {}, BYKEY = {}, BYID = {}, SUMMARY_BY_ID = {}, DAYS = [], ALT_OPTS = ["village"], DOM = {}, BASE = null, EGRID = [];
+const fmtD = d => new Date(d + "T00:00Z").toLocaleDateString("en-GB", {day: "numeric", month: "short", timeZone: "UTC"});
+const fmtW = d => new Date(d + "T00:00Z").toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", timeZone: "UTC"});
+const nf1 = v => v == null ? "–" : v.toLocaleString("en-GB", {minimumFractionDigits: 1, maximumFractionDigits: 1});
+const nf0 = v => v == null ? "–" : Math.round(v).toLocaleString("en-GB");
+
+function buildModel(daily, summary) {
+  need(daily, ["series_id", "location_id", "location_name", "latitude", "longitude", "ground_elevation_m", "type", "elevation_m", "point_latitude", "point_longitude", "point_elevation_m", "date_local", "n_hours", "t_min_c", "t_max_c", "hours_above_0c", "hours_air_le_0c", "precip_mm", "rain_mm", "snow_we_mm", "fl_min_m", "fl_mean_m", "fl_max_m", "hours_fl_below_alt", "night_clear_h", "night_partial_h", "night_cloudy_h", "night_cloud_mean_pct"], DATA_DAILY);
+  need(summary, ["series_id", "n_days", "n_hours", "hours_above_0c", "pct_hours_above_0c", "precip_mm", "snow_pct", "fl_mean_m", "hours_fl_below_alt", "hours_air_le_0c", "pct_night_clear"], DATA_SUMMARY);
+  const rows = daily.map(typed), fc = rows.filter(r => r.type === "forecast"), other = rows.length - fc.length;
+  const srcNames = [...new Set(fc.map(r => r.source_name).filter(Boolean))];
+  document.getElementById("srcnote").textContent = `Source: ${srcNames.join(", ") || "–"}` + (other ? ` · ${other} non-forecast daily rows ignored.` : "");
+  const locMap = new Map();
+  for (const r of fc) {
+    if (!locMap.has(r.location_id)) locMap.set(r.location_id, {id: r.location_id, name: r.location_name, cc: r.country || "", lat: r.latitude, lon: r.longitude, ground: r.ground_elevation_m});
+    const key = r.location_id + ":" + r.elevation_m;
+    const s = BYKEY[key] ??= {id: r.series_id, loc: r.location_id, elev: r.elevation_m, plat: r.point_latitude, plon: r.point_longitude, celev: r.point_elevation_m, byDate: {}};
+    if (s.id !== r.series_id) console.warn(`Two forecast series at ${key}: keeping series ${s.id}, ignoring ${r.series_id}`);
+    else s.byDate[r.date_local] = {
+      nh: r.n_hours, tmin: r.t_min_c, tmax: r.t_max_c, h0: r.hours_above_0c, hle0: r.hours_air_le_0c,
+      p: r.precip_mm, liq: r.rain_mm, sol: r.snow_we_mm, flmin: r.fl_min_m, flmean: r.fl_mean_m, flmax: r.fl_max_m, fb: r.hours_fl_below_alt,
+      clear: r.night_clear_h, partial: r.night_partial_h, cloudy: r.night_cloudy_h, cc: r.night_cloud_mean_pct};
+  }
+  LOCS = [...locMap.values()].sort((a, b) => a.id - b.id);
+  LOC = Object.fromEntries(LOCS.map(l => [l.id, l]));
+  DAYS = [...new Set(fc.map(r => r.date_local))].sort();           // union of all series' days
+  for (const s of Object.values(BYKEY)) { s.days = DAYS.map(d => s.byDate[d] || null); BYID[s.id] = s; }
+  for (const r of summary.map(typed)) SUMMARY_BY_ID[r.series_id] = r;
+  const lists = [...new Set(Object.values(BYKEY).filter(s => s.elev !== LOC[s.loc].ground).map(s => s.elev))].sort((a, b) => a - b);
+  ALT_OPTS = ["village", ...lists];
+  const all = Object.values(BYKEY).flatMap(s => s.days).filter(Boolean);
+  const ext = (f, g) => { const v = all.map(f).filter(x => x != null); return v.length ? g(...v) : 0; };
+  const niceDom = (lo, hi, step) => [Math.floor(lo / step) * step, Math.max(Math.ceil(hi / step) * step, Math.floor(lo / step) * step + step)];
+  const maxH = Math.max(24, ext(d => d.nh, Math.max));
+  DOM = { temp: niceDom(ext(d => d.tmin, Math.min), ext(d => d.tmax, Math.max), 5), h: [0, maxH],
+          fl: niceDom(ext(d => d.flmin, Math.min), ext(d => d.flmax, Math.max), 500),
+          precip: niceDom(0, ext(d => d.p, Math.max), 10),
+          night: [0, Math.max(5, ext(d => (d.clear ?? 0) + (d.partial ?? 0) + (d.cloudy ?? 0), Math.max))] };
+  const sumF = Object.values(SUMMARY_BY_ID);
+  document.getElementById("sub").textContent = `${LOCS.length} sites · ${Object.keys(BYKEY).length} forecast series · ${fmtD(DAYS[0])} → ${fmtD(DAYS[DAYS.length - 1])} ${DAYS[0].slice(0, 4)} (local days)` +
+    (sumF.some(r => r.n_days != null && r.n_days < 21) ? " · some series have fewer than 21 days (see tables)" : "");
+}
+const ticks = (d, step) => { const t = []; for (let v = d[0]; v <= d[1] + 1e-9; v += step) t.push(v); return t; };
+const seriesFor = (locId, alt) => BYKEY[locId + ":" + (alt === "village" ? LOC[locId].ground : alt)] || null;
+const altsOf = locId => Object.values(BYKEY).filter(s => s.loc === locId).map(s => s.elev).sort((a, b) => a - b);
+
+// ---- state --------------------------------------------------------------------------------
+let selected = [], alt = "village";
+function loadSel() {
+  try { const s = JSON.parse(localStorage.getItem("iceSel") || "null"); if (Array.isArray(s) && s.length <= MAX_SELECTED && s.every(x => LOC[x])) return s; } catch (e) {}
+  const byName = DEFAULT_SELECTED_NAMES.map(n => LOCS.find(l => l.name === n)).filter(Boolean).map(l => l.id);
+  return (byName.length ? byName : LOCS.map(l => l.id)).slice(0, MAX_SELECTED);
+}
+function saveSel() { try { localStorage.setItem("iceSel", JSON.stringify(selected)); } catch (e) {} }
+
+// ---- svg helpers ----------------------------------------------------------------------------
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs = {}, parent) { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (parent) parent.appendChild(e); return e; }
+const lin = (d0, d1, r0, r1) => v => r0 + (v - d0) / (d1 - d0) * (r1 - r0);
+function barPath(x, w, yt, yb, r = 2) { const h = yb - yt; if (!(h > 0.5)) return ""; r = Math.min(r, w / 2, h); return `M${x},${yb}V${yt + r}Q${x},${yt} ${x + r},${yt}H${x + w - r}Q${x + w},${yt} ${x + w},${yt + r}V${yb}Z`; }
+const tip = document.getElementById("tip");
+function showTip(html, ev) { tip.innerHTML = html; tip.style.opacity = 1; const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight; let x = ev.clientX + pad, y = ev.clientY + pad; if (x + w > innerWidth - 8) x = ev.clientX - w - pad; if (y + h > innerHeight - 8) y = ev.clientY - h - pad; tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px"; }
+function hideTip() { tip.style.opacity = 0; }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const row = (k, v) => `<div class="r"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
+const noData = i => `<b>${fmtW(DAYS[i])}</b><div>No data for this day</div>`;
+
+function frame(container, height, dom, tks, unit, title) {
+  const N = DAYS.length, W = Math.max(260, container.clientWidth);
+  const m = {l: 42, r: 8, t: title ? 18 : 6, b: 20};
+  const svg = el("svg", {width: W, height, viewBox: `0 0 ${W} ${height}`, role: "img", "aria-label": title || ""});
+  const bw = (W - m.l - m.r) / N, y = lin(dom[0], dom[1], height - m.b, m.t);
+  if (title) el("text", {x: m.l, y: 11, class: "ttl"}, svg).textContent = title;
+  tks.forEach(v => { el("line", {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: "var(--grid)"}, svg); el("text", {x: m.l - 6, y: y(v) + 3.5, "text-anchor": "end"}, svg).textContent = v.toLocaleString("en-GB") + (unit || ""); });
+  el("line", {x1: m.l, x2: W - m.r, y1: height - m.b, y2: height - m.b, stroke: "var(--axis)"}, svg);
+  const lab = [...new Set([0, ...Array.from({length: Math.floor((N - 1) / 7)}, (_, k) => (k + 1) * 7).filter(i => i < N - 3), N - 1])];
+  lab.forEach(i => { const last = i === N - 1; el("text", {x: last ? W - m.r : m.l + (i + .5) * bw, y: height - 5, "text-anchor": last ? "end" : "middle"}, svg).textContent = fmtD(DAYS[i]); });
+  const hl = el("rect", {y: m.t, height: height - m.b - m.t, width: bw, fill: "var(--hover)", opacity: 0, rx: 3}, svg);
+  const marks = el("g", {}, svg);
+  container.appendChild(svg);
+  return { svg, marks, bw, y, m, W, x: i => m.l + i * bw, base: height - m.b,
+    addHover(htmlFor) { const g = el("g", {}, svg); for (let i = 0; i < N; i++) { const r = el("rect", {x: m.l + i * bw, y: m.t, width: bw, height: height - m.b - m.t, fill: "transparent"}, g);
+      const on = ev => { hl.setAttribute("x", m.l + i * bw); hl.setAttribute("opacity", 1); showTip(htmlFor(i), ev); };
+      r.addEventListener("pointermove", on); r.addEventListener("pointerdown", on); r.addEventListener("pointerleave", () => { hl.setAttribute("opacity", 0); hideTip(); }); } } };
+}
+const has = v => v != null && !Number.isNaN(v);
+// path through consecutive non-null points (gaps break the line)
+function linePath(pts) { let d = "", pen = false; for (const p of pts) { if (!p) { pen = false; continue; } d += (pen ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1); pen = true; } return d; }
+
+const DRAW = {
+  temp(chart, s) {
+    const d = s.days, f = frame(chart, 170, DOM.temp, ticks(DOM.temp, 5), "°", "Min–max °C");
+    if (DOM.temp[0] < 0 && DOM.temp[1] > 0) el("line", {x1: f.m.l, x2: f.W - f.m.r, y1: f.y(0), y2: f.y(0), stroke: "var(--text-muted)", "stroke-dasharray": "3 3"}, f.marks);
+    const w = Math.max(3, Math.min(10, f.bw * .5));
+    d.forEach((r, i) => { if (!r || !has(r.tmin) || !has(r.tmax)) return; el("rect", {x: f.x(i) + (f.bw - w) / 2, width: w, y: f.y(r.tmax), height: Math.max(2, f.y(r.tmin) - f.y(r.tmax)), rx: Math.min(3, w / 2), fill: "var(--s1)"}, f.marks); });
+    const tp = i => !d[i] ? noData(i) : `<b>${fmtW(DAYS[i])}</b>` + row("Min", nf1(d[i].tmin) + " °C") + row("Max", nf1(d[i].tmax) + " °C") + row("Hours > 0 °C", `${nf0(d[i].h0)} / ${nf0(d[i].nh)}`);
+    f.addHover(tp);
+    const g = frame(chart, 96, DOM.h, [0, 12, 24], "h", "Hours above 0 °C"), w2 = Math.max(3, g.bw - 2);
+    d.forEach((r, i) => { if (!r || !has(r.h0)) return; const p = barPath(g.x(i) + (g.bw - w2) / 2, w2, g.y(r.h0), g.base); if (p) el("path", {d: p, fill: "var(--s2)"}, g.marks); });
+    g.addHover(tp);
+  },
+  fl(chart, s) {
+    const d = s.days, f = frame(chart, 190, DOM.fl, ticks(DOM.fl, DOM.fl[1] - DOM.fl[0] > 3000 ? 1000 : 500), "", "Metres above sea level"), cx = i => f.x(i) + f.bw / 2;
+    // band drawn per run of consecutive days with data
+    let run = [];
+    const flush = () => { if (run.length > 1) el("path", {d: "M" + run.map(i => `${cx(i)},${f.y(d[i].flmax)}`).join("L") + "L" + run.slice().reverse().map(i => `${cx(i)},${f.y(d[i].flmin)}`).join("L") + "Z", fill: "var(--band)", opacity: .75}, f.marks); run = []; };
+    d.forEach((r, i) => { if (r && has(r.flmin) && has(r.flmax)) run.push(i); else flush(); }); flush();
+    el("path", {d: linePath(d.map((r, i) => r && has(r.flmean) ? [cx(i), f.y(r.flmean)] : null)), fill: "none", stroke: "var(--line)", "stroke-width": 2, "stroke-linejoin": "round"}, f.marks);
+    if (s.elev >= DOM.fl[0] && s.elev <= DOM.fl[1]) {
+      el("line", {x1: f.m.l, x2: f.W - f.m.r, y1: f.y(s.elev), y2: f.y(s.elev), stroke: "var(--s2)", "stroke-width": 2, "stroke-dasharray": "5 4"}, f.marks);
+      el("text", {x: f.W - f.m.r, y: f.y(s.elev) - 5, "text-anchor": "end", style: "fill:var(--text-secondary);font-weight:600;stroke:var(--surface-1);stroke-width:3px;paint-order:stroke"}, f.marks).textContent = nf0(s.elev) + " m";
+    }
+    const tp = i => !d[i] ? noData(i) : `<b>${fmtW(DAYS[i])}</b>` + row("Min", nf0(d[i].flmin) + " m") + row("Mean", nf0(d[i].flmean) + " m") + row("Max", nf0(d[i].flmax) + " m") + row(`h 0 °C level < ${nf0(s.elev)} m`, `${nf0(d[i].fb)} / ${nf0(d[i].nh)}`) + row("h air ≤ 0 °C", `${nf0(d[i].hle0)} / ${nf0(d[i].nh)}`);
+    f.addHover(tp);
+    const g = frame(chart, 110, DOM.h, [0, 12, 24], "h", `Freezing hours at ${nf0(s.elev)} m`), w = Math.max(3, g.bw - 2);
+    d.forEach((r, i) => { if (!r) return; const x = g.x(i) + (g.bw - w) / 2;
+      if (has(r.fb)) { const p = barPath(x, w, g.y(r.fb), g.base); if (p) el("path", {d: p, fill: "var(--s1)"}, g.marks); }
+      if (has(r.hle0)) el("rect", {x: x - 1, y: g.y(r.hle0) - 2.5, width: w + 2, height: 5, rx: 1.5, fill: "var(--s2)", stroke: "var(--surface-1)", "stroke-width": 1}, g.marks); });
+    g.addHover(tp);
+  },
+  precip(chart, s) {
+    const d = s.days, f = frame(chart, 180, DOM.precip, ticks(DOM.precip, DOM.precip[1] > 40 ? 20 : 10), "", "mm per day"), w = Math.max(3, f.bw - 2);
+    d.forEach((r, i) => { if (!r || !has(r.p)) return; const x = f.x(i) + (f.bw - w) / 2;
+      if (!has(r.liq)) { const p = barPath(x, w, f.y(r.p), f.base); if (p) el("path", {d: p, fill: "var(--text-muted)"}, f.marks); return; }   // phase unknown
+      const sol = has(r.sol) ? r.sol : 0, yl = f.y(r.liq), yt = f.y(r.liq + sol);
+      if (r.liq > 0 && f.base - yl > .3) el("path", {d: sol > 0 ? `M${x},${f.base}V${yl}H${x + w}V${f.base}Z` : barPath(x, w, yl, f.base), fill: "var(--s1)"}, f.marks);
+      if (sol > 0) { const b = r.liq > 0 ? yl - 2 : f.base, p = barPath(x, w, Math.min(yt, b - 1), b); if (p) el("path", {d: p, fill: "var(--s3)"}, f.marks); } });
+    f.addHover(i => { const r = d[i]; if (!r) return noData(i); return `<b>${fmtW(DAYS[i])}</b>` + row("Total", nf1(r.p) + " mm") + row("Rain", nf1(r.liq) + " mm") + row("Snow (w.e.)", nf1(r.sol) + " mm") + (r.p > 0 && has(r.sol) ? row("Snow share", nf0(100 * r.sol / r.p) + " %") : ""); });
+  },
+  night(chart, s) {
+    const d = s.days, f = frame(chart, 160, DOM.night, ticks(DOM.night, 5), "h", "Night hours"), w = Math.max(3, f.bw - 2);
+    d.forEach((r, i) => { if (!r) return; const x = f.x(i) + (f.bw - w) / 2; let acc = 0;
+      const segs = [["clear", "var(--o1)"], ["partial", "var(--o2)"], ["cloudy", "var(--o3)"]].filter(([k]) => has(r[k]) && r[k] > 0);
+      segs.forEach(([k, c], j) => { const yb = f.y(acc) - (acc > 0 ? 2 : 0), yt = f.y(acc + r[k]); acc += r[k];
+        if (yb - yt > .3) el("path", {d: j === segs.length - 1 ? barPath(x, w, yt, yb) : `M${x},${yb}V${yt}H${x + w}V${yb}Z`, fill: c}, f.marks); }); });
+    f.addHover(i => { const r = d[i]; if (!r) return noData(i); const n = new Date(Date.parse(DAYS[i] + "T00:00Z") + 864e5).toISOString().slice(0, 10);
+      return `<b>Night ${fmtD(DAYS[i])} → ${fmtD(n)}</b>` + row("Clear", nf0(r.clear) + " h") + row("Partial", nf0(r.partial) + " h") + row("Cloudy", nf0(r.cloudy) + " h") + row("Mean cover", nf0(r.cc) + " %"); });
+  }
+};
+// Card headlines: straight from v_series_summary_21d
+const HEADLINE = {
+  temp: m => `Σ hours > 0 °C: ${nf0(m.hours_above_0c)} / ${nf0(m.n_hours)} (${nf0(m.pct_hours_above_0c)} %)`,
+  fl: m => `mean ${nf0(m.fl_mean_m)} m · freezing h: ${nf0(m.hours_fl_below_alt)} (0 °C level) vs ${nf0(m.hours_air_le_0c)} (air)`,
+  precip: m => `Σ ${nf0(m.precip_mm)} mm · snow ${m.snow_pct == null ? "–" : nf0(m.snow_pct) + " %"}`,
+  night: m => `clear ${m.pct_night_clear == null ? "–" : nf0(m.pct_night_clear) + " %"} of night hours`
+};
+
+// ---- map ------------------------------------------------------------------------------------
+const mapEl = document.getElementById("map"), canvas = document.getElementById("relief"), msvg = document.getElementById("mapsvg");
+let KX = 1, ASPECT = 1;
+function cssVar(n) { return getComputedStyle(document.querySelector(".viz-root")).getPropertyValue(n).trim(); }
+function hex2rgb(h) { h = h.replace("#", ""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+const inMap = l => l.lon >= BASE.lon0 && l.lon <= BASE.lon1 && l.lat >= BASE.lat0 && l.lat <= BASE.lat1;
+function drawRelief() {
+  const {nx, ny} = BASE, lo = hex2rgb(cssVar("--relief-lo")), hi = hex2rgb(cssVar("--relief-hi"));
+  const small = document.createElement("canvas"); small.width = nx; small.height = ny;
+  const sctx = small.getContext("2d"), img = sctx.createImageData(nx, ny);
+  const z = (i, j) => EGRID[Math.min(ny - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
+  const cell = BASE.step * 111000;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const e = z(i, j), t = Math.min(1, Math.max(0, (e - 300) / 3300));
+    const dzdx = (z(i + 1, j) - z(i - 1, j)) / (2 * cell * KX), dzdy = (z(i, j - 1) - z(i, j + 1)) / (2 * cell);
+    const a = -dzdx * 3, b = -dzdy * 3, len = Math.hypot(a, b, 1), lx = -0.5, ly = 0.6, lz = 0.62, ll = Math.hypot(lx, ly, lz);
+    const k = 0.55 + 0.55 * Math.max(0, (a * lx + b * ly + lz) / (len * ll)), p = (j * nx + i) * 4;
+    for (let c = 0; c < 3; c++) img.data[p + c] = Math.max(0, Math.min(255, (lo[c] + (hi[c] - lo[c]) * t) * k));
+    img.data[p + 3] = 255;
+  }
+  sctx.putImageData(img, 0, 0);
+  const W = mapEl.clientWidth, H = mapEl.clientHeight, dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  const ctx = canvas.getContext("2d"); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  const hx = BASE.step / 2 * W / (BASE.lon1 - BASE.lon0) * dpr, hy = BASE.step / 2 * H / (BASE.lat1 - BASE.lat0) * dpr;
+  ctx.drawImage(small, -hx, -hy, canvas.width + 2 * hx, canvas.height + 2 * hy);
+}
+function drawMap() {
+  const W = mapEl.clientWidth; mapEl.style.height = Math.round(W / ASPECT) + "px"; const H = mapEl.clientHeight;
+  const proj = (lon, lat) => [(lon - BASE.lon0) / (BASE.lon1 - BASE.lon0) * W, (BASE.lat1 - lat) / (BASE.lat1 - BASE.lat0) * H];
+  drawRelief();
+  msvg.setAttribute("viewBox", `0 0 ${W} ${H}`); msvg.textContent = "";
+  (BASE.borders || "").split("|").filter(Boolean).forEach(l => { const pts = l.split(" ").map(p => p.split(",").map(v => +v / 100)).map(([lo, la]) => proj(lo, la));
+    el("path", {d: "M" + pts.map(p => p.map(v => v.toFixed(1)).join(",")).join("L"), fill: "none", stroke: "var(--border-line)", "stroke-width": 1.2, "stroke-dasharray": "6 3 1.5 3", opacity: .8}, msvg); });
+  (BASE.labels || []).forEach(([t, lo, la]) => { const [x, y] = proj(lo, la); el("text", {x, y, class: "maptxt", "text-anchor": "middle", "letter-spacing": "2"}, msvg).textContent = t; });
+  const km = 20, dlon = km / (111.32 * KX), [x0, y0] = proj(BASE.lon0 + 0.08, BASE.lat0 + 0.12), [x1] = proj(BASE.lon0 + 0.08 + dlon, BASE.lat0);
+  el("line", {x1: x0, x2: x1, y1: y0, y2: y0, stroke: "var(--text-muted)", "stroke-width": 2}, msvg);
+  el("text", {x: (x0 + x1) / 2, y: y0 - 5, class: "scale", "text-anchor": "middle"}, msvg).textContent = km + " km";
+  LOCS.filter(inMap).forEach(l => {
+    const [x, y] = proj(l.lon, l.lat), idx = selected.indexOf(l.id), on = idx >= 0;
+    const g = el("g", {class: "pin" + (on ? " on" : ""), tabindex: 0, role: "button", "aria-pressed": on, "data-loc": l.id, "aria-label": `${l.name}, village ${l.ground} m${on ? ", selected " + (idx + 1) : ""}`}, msvg);
+    el("circle", {class: "hit", cx: x, cy: y, r: 16}, g);
+    el("circle", {class: "dot", cx: x, cy: y, r: on ? 9 : 6}, g);
+    if (on) el("text", {class: "num", x, y: y + 4, "text-anchor": "middle"}, g).textContent = idx + 1;
+    const left = x > W * 0.72;
+    el("text", {class: "lbl", x: left ? x - 13 : x + 13, y: y + 4, "text-anchor": left ? "end" : "start"}, g).textContent = l.name;
+    g.addEventListener("click", () => toggle(l.id));
+    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(l.id); } });
+    g.addEventListener("pointermove", ev => showTip(`<b>${esc(l.name)}</b>${l.cc ? " (" + esc(l.cc) + ")" : ""}` + row("Village", nf0(l.ground) + " m") + row("Series", altsOf(l.id).map(nf0).join(", ") + " m") + `<div style="margin-top:4px;opacity:.75">${on ? "Click to deselect" : "Click to select"}</div>`, ev));
+    g.addEventListener("pointerleave", hideTip);
+  });
+}
+let msgT;
+function say(t) { const m = document.getElementById("msg"); m.textContent = t; clearTimeout(msgT); if (t) msgT = setTimeout(() => m.textContent = "", 4000); }
+function toggle(id) {
+  const i = selected.indexOf(id);
+  if (i >= 0) { selected.splice(i, 1); say(""); }
+  else if (selected.length >= MAX_SELECTED) { say(`Max ${MAX_SELECTED} sites: deselect one before adding ${LOC[id].name}.`); return; }
+  else { selected.push(id); say(""); }
+  saveSel(); hideTip(); drawMap();
+  msvg.querySelector(`.pin[data-loc="${id}"]`)?.focus({preventScroll: true});
+  renderSide(); render();
+}
+function renderSide() {
+  const ul = document.getElementById("sellist"); ul.textContent = "";
+  if (!selected.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "No site selected."; ul.appendChild(li); }
+  selected.forEach((id, i) => { const l = LOC[id], li = document.createElement("li");
+    const b = document.createElement("span"); b.className = "badge"; b.textContent = i + 1;
+    const n = document.createElement("span"); n.textContent = l.name;
+    const m = document.createElement("span"); m.className = "meta"; m.textContent = `${l.cc ? l.cc + " · " : ""}village ${nf0(l.ground)} m${inMap(l) ? "" : " · outside map"}`;
+    const x = document.createElement("button"); x.type = "button"; x.textContent = "Remove"; x.setAttribute("aria-label", "Remove " + l.name); x.addEventListener("click", () => toggle(id));
+    li.append(b, n, m, x); ul.appendChild(li); });
+  // sites outside the basemap extent can still be added from here
+  const off = LOCS.filter(l => !inMap(l) && !selected.includes(l.id));
+  off.forEach(l => { const li = document.createElement("li"); const n = document.createElement("span"); n.className = "meta"; n.textContent = `${l.name} (outside map)`;
+    const x = document.createElement("button"); x.type = "button"; x.textContent = "Add"; x.addEventListener("click", () => toggle(l.id)); li.append(n, x); ul.appendChild(li); });
+  const chips = document.getElementById("chips"); chips.textContent = "";
+  const a = document.createElement("span"); a.textContent = alt === "village" ? "village altitude" : nf0(alt) + " m"; a.style.fontWeight = "600"; chips.appendChild(a);
+  selected.forEach((id, i) => { const s = document.createElement("span"); s.textContent = `${i + 1} ${LOC[id].name}`; chips.appendChild(s); });
+}
+
+// ---- cards & tables ---------------------------------------------------------------------------
+function render() {
+  const todo = [];
+  document.querySelectorAll(".grid").forEach(grid => {
+    const kind = grid.dataset.kind; grid.textContent = "";
+    if (!selected.length) { const p = document.createElement("p"); p.className = "desc"; p.textContent = `Select up to ${MAX_SELECTED} sites on the map.`; grid.appendChild(p); return; }
+    selected.forEach((id, i) => {
+      const l = LOC[id], s = seriesFor(id, alt), cellKind = kind === "precip" || kind === "night";
+      const card = document.createElement("div"); card.className = "card"; card.id = `${kind}-${l.id}`;
+      const h = document.createElement("h3"); const b = document.createElement("span"); b.className = "badge"; b.textContent = i + 1;
+      const n = document.createElement("span"); n.textContent = `${l.name} · ${!s ? nf0(alt === "village" ? l.ground : alt) + " m" : cellKind ? "grid cell " + nf0(s.celev) + " m" : nf0(s.elev) + " m"}`; h.append(b, n);
+      card.appendChild(h);
+      if (!s) { const na = document.createElement("div"); na.className = "na";
+        na.textContent = (alt !== "village" && alt < l.ground ? `No series at ${nf0(alt)} m: it is below the village (${nf0(l.ground)} m).` : `No series at ${nf0(alt === "village" ? l.ground : alt)} m in the data.`) + ` Available: ${altsOf(id).map(nf0).join(", ")} m.`;
+        card.appendChild(na); grid.appendChild(card); return; }
+      const m = SUMMARY_BY_ID[s.id];
+      const k = document.createElement("div"); k.className = "k";
+      k.textContent = m ? HEADLINE[kind](m) + (m.n_days != null && m.n_days < 21 ? ` · ${m.n_days} days` : "") : "No summary row for this series";
+      const c = document.createElement("div"); c.className = "cell"; const dz = has(s.celev) ? s.celev - s.elev : null;
+      c.textContent = cellKind ? `Series ${nf0(s.elev)} m; values come from the model grid cell at ${nf0(s.celev)} m${dz == null ? "" : ` (${dz >= 0 ? "+" : "−"}${nf0(Math.abs(dz))} m)`} · ${s.plat?.toFixed(3)}° N, ${s.plon?.toFixed(3)}° E`
+                               : `Grid cell ${s.plat?.toFixed(3)}° N, ${s.plon?.toFixed(3)}° E, cell altitude ${nf0(s.celev)} m`;
+      const chart = document.createElement("div"); chart.className = "chart";
+      card.append(k, c, chart); grid.appendChild(card);
+      todo.push(() => DRAW[kind](chart, s));
+    });
+  });
+  todo.forEach(f => f());
+  renderTables();
+}
+function renderTables() {
+  const box = document.getElementById("tables"); box.textContent = "";
+  const cols = [["Date", null], ["Min °C", r => nf1(r.tmin)], ["Max °C", r => nf1(r.tmax)], ["h > 0 °C", r => nf0(r.h0)], ["h air ≤ 0 °C", r => nf0(r.hle0)], ["Precip mm", r => nf1(r.p)], ["Rain mm", r => nf1(r.liq)], ["Snow w.e. mm", r => nf1(r.sol)], ["Snow %", r => r.p > 0 && has(r.sol) ? nf0(100 * r.sol / r.p) : "–"], ["0 °C min m", r => nf0(r.flmin)], ["0 °C mean m", r => nf0(r.flmean)], ["0 °C max m", r => nf0(r.flmax)], ["h 0 °C level < alt", r => nf0(r.fb)], ["Night clear h", r => nf0(r.clear)], ["Night partial h", r => nf0(r.partial)], ["Night cloudy h", r => nf0(r.cloudy)], ["Night cover %", r => nf0(r.cc)]];
+  selected.forEach(id => { const s = seriesFor(id, alt); if (!s) return;
+    const wrap = document.createElement("div"); wrap.className = "tblwrap"; const t = document.createElement("table");
+    const cap = document.createElement("caption"); cap.textContent = `${LOC[id].name} — series ${nf0(s.elev)} m (precipitation and night sky: grid cell ${nf0(s.celev)} m)`; t.appendChild(cap);
+    const hr = t.createTHead().insertRow(); cols.forEach(([n]) => { const th = document.createElement("th"); th.textContent = n; hr.appendChild(th); });
+    const tb = t.createTBody(); s.days.forEach((r, i) => { const tr = tb.insertRow(); cols.forEach(([n, fn], j) => { tr.insertCell().textContent = j === 0 ? fmtW(DAYS[i]) : (r ? fn(r) : "–"); }); });
+    wrap.appendChild(t); box.appendChild(wrap); });
+}
+
+// ---- altitude control ---------------------------------------------------------------------------
+const seg = document.getElementById("altSeg");
+function buildAltButtons() {
+  seg.textContent = "";
+  ALT_OPTS.forEach(a => { const b = document.createElement("button"); b.type = "button"; b.setAttribute("role", "radio"); b.dataset.alt = a; b.textContent = a === "village" ? "Village" : nf0(a) + " m";
+    b.addEventListener("click", () => setAlt(a, true));
+    b.addEventListener("keydown", e => { const k = ALT_OPTS.indexOf(alt), n = ALT_OPTS.length;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); setAlt(ALT_OPTS[(k + 1) % n], true); seg.children[(k + 1) % n].focus(); }
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); setAlt(ALT_OPTS[(k + n - 1) % n], true); seg.children[(k + n - 1) % n].focus(); } });
+    seg.appendChild(b); });
+}
+function setAlt(a, push) { alt = a; [...seg.children].forEach(b => { const on = b.dataset.alt === String(a); b.setAttribute("aria-checked", on); b.tabIndex = on ? 0 : -1; });
+  if (push) { try { history.replaceState(null, "", "#alt-" + a); } catch (e) {} }
+  hideTip(); renderSide(); render(); }
+function fromHash() { const m = /^#alt-(village|\d+)$/.exec(location.hash); if (!m) return "village"; return m[1] === "village" ? "village" : (ALT_OPTS.includes(+m[1]) ? +m[1] : "village"); }
+
+// ---- boot ---------------------------------------------------------------------------------------
+async function fetchText(url) { const r = await fetch(url, {cache: "no-cache"}); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.text(); }
+async function init() {
+  try {
+    const [d, s, b] = await Promise.all([fetchText(DATA_DAILY), fetchText(DATA_SUMMARY), fetchText(DATA_BASEMAP)]);
+    BASE = JSON.parse(b);
+    EGRID = Array.from(BASE.terrain, c => BASE.alphabet.indexOf(c) * BASE.quantum_m);
+    KX = Math.cos((BASE.lat0 + BASE.lat1) / 2 * Math.PI / 180);
+    ASPECT = (BASE.lon1 - BASE.lon0) * KX / (BASE.lat1 - BASE.lat0);
+    buildModel(parseCSV(d), parseCSV(s));
+    if (!LOCS.length) throw new Error(`${DATA_DAILY}: no forecast rows`);
+  } catch (e) {
+    const box = document.getElementById("loaderr"); box.hidden = false;
+    box.textContent = `Could not load the data (${e.message}).` + (location.protocol === "file:" ? " Browsers block loading files from a page opened with file://; serve the folder over HTTP, e.g. `python3 -m http.server`, or use GitHub Pages." : "");
+    document.getElementById("sub").textContent = "";
+    return;
+  }
+  selected = loadSel();
+  buildAltButtons();
+  addEventListener("hashchange", () => setAlt(fromHash(), false));
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { drawMap(); render(); }, 120); });
+  try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => drawMap()); } catch (e) {}
+  try { new MutationObserver(() => drawMap()).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]}); } catch (e) {}
+  drawMap(); setAlt(fromHash(), false);
+}
+init();
+</script>
+</body>
+</html>
