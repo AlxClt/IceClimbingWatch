@@ -1,0 +1,51 @@
+name: Deploy Pages
+
+# The weather CSVs are not tracked in git: they are assets of the "data" release, overwritten
+# by the backend workflow (AlxClt/IceClimbingWatchBackend), which then sends a "data-updated"
+# repository_dispatch. Each deploy downloads them into data/ so the site serves them same-origin.
+on:
+  push:
+    branches: [main]
+  repository_dispatch:
+    types: [data-updated]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Download weather CSVs from the data release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p data
+          gh release download data -p '*.csv' -D data --clobber
+          ls -l data
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
