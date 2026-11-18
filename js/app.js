@@ -24,7 +24,7 @@ function typed(o) { const t = {}; for (const [k, v] of Object.entries(o)) t[k] =
 function need(rows, cols, file) { const miss = cols.filter(c => !(c in (rows[0] || {}))); if (miss.length) throw new Error(`${file}: missing column(s) ${miss.join(", ")}`); }
 
 // ---- globals filled by init() -------------------------------------------------------------------
-let LOCS = [], LOC = {}, BYKEY = {}, DAYS = [], ALT_OPTS = ["village"], DOM = {}, BASE = null;
+let LOCS = [], LOC = {}, BYKEY = {}, DAYS = [], PRED_IDX = -1, ALT_OPTS = ["village"], DOM = {}, BASE = null;
 const fmtD = d => new Date(d + "T00:00Z").toLocaleDateString("en-GB", {day: "numeric", month: "short", timeZone: "UTC"});
 const fmtW = d => new Date(d + "T00:00Z").toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", timeZone: "UTC"});
 const nf1 = v => v == null ? "–" : v.toLocaleString("en-GB", {minimumFractionDigits: 1, maximumFractionDigits: 1});
@@ -44,12 +44,14 @@ function buildModel(daily) {
     else s.byDate[r.date_local] = {
       nh: r.n_hours, tmin: r.t_min_c, tmax: r.t_max_c, h0: r.hours_above_0c, hle0: r.hours_air_le_0c,
       p: r.precip_mm, liq: r.rain_mm, sol: r.snow_we_mm, flmin: r.fl_min_m, flmean: r.fl_mean_m, flmax: r.fl_max_m, fb: r.hours_fl_below_alt,
-      clear: r.night_clear_h, partial: r.night_partial_h, cloudy: r.night_cloudy_h, cc: r.night_cloud_mean_pct};
+      clear: r.night_clear_h, partial: r.night_partial_h, cloudy: r.night_cloudy_h, cc: r.night_cloud_mean_pct,
+      pred: r.is_prediction === 1};
   }
   LOCS = [...locMap.values()].sort((a, b) => a.id - b.id);
   LOC = Object.fromEntries(LOCS.map(l => [l.id, l]));
   DAYS = [...new Set(fc.map(r => r.date_local))].sort();           // union of all series' days
   for (const s of Object.values(BYKEY)) s.days = DAYS.map(d => s.byDate[d] || null);
+  PRED_IDX = DAYS.findIndex(d => Object.values(BYKEY).some(s => s.byDate[d]?.pred));
   const lists = [...new Set(Object.values(BYKEY).filter(s => s.elev !== LOC[s.loc].ground).map(s => s.elev))].sort((a, b) => a - b);
   ALT_OPTS = ["village", ...lists];
   const all = Object.values(BYKEY).flatMap(s => s.days).filter(Boolean);
@@ -97,6 +99,8 @@ function frame(container, height, dom, tks, unit, title) {
   el("line", {x1: m.l, x2: W - m.r, y1: height - m.b, y2: height - m.b, stroke: "var(--axis)"}, svg);
   const lab = [...new Set([0, ...Array.from({length: Math.floor((N - 1) / 7)}, (_, k) => (k + 1) * 7).filter(i => i < N - 3), N - 1])];
   lab.forEach(i => { const last = i === N - 1; el("text", {x: last ? W - m.r : m.l + (i + .5) * bw, y: height - 5, "text-anchor": last ? "end" : "middle"}, svg).textContent = fmtD(DAYS[i]); });
+  // dashed separator between historical data and predictions (at the left edge of the first predicted day)
+  if (PRED_IDX > 0) el("line", {x1: m.l + PRED_IDX * bw, x2: m.l + PRED_IDX * bw, y1: m.t, y2: height - m.b, stroke: "var(--text-primary)", "stroke-width": 1, "stroke-dasharray": "4 3"}, svg);
   const hl = el("rect", {y: m.t, height: height - m.b - m.t, width: bw, fill: "var(--hover)", opacity: 0, rx: 3}, svg);
   const marks = el("g", {}, svg);
   container.appendChild(svg);
@@ -106,6 +110,12 @@ function frame(container, height, dom, tks, unit, title) {
       r.addEventListener("pointermove", on); r.addEventListener("pointerdown", on); r.addEventListener("pointerleave", () => { hl.setAttribute("opacity", 0); hideTip(); }); } } };
 }
 const has = v => v != null && !Number.isNaN(v);
+// predicted days (is_prediction = 1) are drawn at 50% opacity
+const PRED_OPACITY = 0.5;
+const po = (r, base = 1) => r && r.pred ? {opacity: base * PRED_OPACITY} : (base < 1 ? {opacity: base} : {});
+const predTag = r => r && r.pred ? " (prediction)" : "";
+// runs of consecutive indices i (with d[i] usable) accepted by `pick`
+function runsOf(n, pick) { const out = []; let cur = []; for (let i = 0; i < n; i++) { if (pick(i)) cur.push(i); else { if (cur.length) out.push(cur); cur = []; } } if (cur.length) out.push(cur); return out; }
 // path through consecutive non-null points (gaps break the line)
 function linePath(pts) { let d = "", pen = false; for (const p of pts) { if (!p) { pen = false; continue; } d += (pen ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1); pen = true; } return d; }
 
@@ -114,49 +124,53 @@ const DRAW = {
     const d = s.days, f = frame(chart, 170, DOM.temp, ticks(DOM.temp, 5), "°", "Min–max °C");
     if (DOM.temp[0] < 0 && DOM.temp[1] > 0) el("line", {x1: f.m.l, x2: f.W - f.m.r, y1: f.y(0), y2: f.y(0), stroke: "var(--text-muted)", "stroke-dasharray": "3 3"}, f.marks);
     const w = Math.max(3, Math.min(10, f.bw * .5));
-    d.forEach((r, i) => { if (!r || !has(r.tmin) || !has(r.tmax)) return; el("rect", {x: f.x(i) + (f.bw - w) / 2, width: w, y: f.y(r.tmax), height: Math.max(2, f.y(r.tmin) - f.y(r.tmax)), rx: Math.min(3, w / 2), fill: "var(--s1)"}, f.marks); });
-    const tp = i => !d[i] ? noData(i) : `<b>${fmtW(DAYS[i])}</b>` + row("Min", nf1(d[i].tmin) + " °C") + row("Max", nf1(d[i].tmax) + " °C") + row("Hours > 0 °C", `${nf0(d[i].h0)} / ${nf0(d[i].nh)}`);
+    d.forEach((r, i) => { if (!r || !has(r.tmin) || !has(r.tmax)) return; el("rect", {x: f.x(i) + (f.bw - w) / 2, width: w, y: f.y(r.tmax), height: Math.max(2, f.y(r.tmin) - f.y(r.tmax)), rx: Math.min(3, w / 2), fill: "var(--s1)", ...po(r)}, f.marks); });
+    const tp = i => !d[i] ? noData(i) : `<b>${fmtW(DAYS[i])}${predTag(d[i])}</b>` + row("Min", nf1(d[i].tmin) + " °C") + row("Max", nf1(d[i].tmax) + " °C") + row("Hours > 0 °C", `${nf0(d[i].h0)} / ${nf0(d[i].nh)}`);
     f.addHover(tp);
     const g = frame(chart, 96, DOM.h, [0, 12, 24], "h", "Hours above 0 °C"), w2 = Math.max(3, g.bw - 2);
-    d.forEach((r, i) => { if (!r || !has(r.h0)) return; const p = barPath(g.x(i) + (g.bw - w2) / 2, w2, g.y(r.h0), g.base); if (p) el("path", {d: p, fill: "var(--s2)"}, g.marks); });
+    d.forEach((r, i) => { if (!r || !has(r.h0)) return; const p = barPath(g.x(i) + (g.bw - w2) / 2, w2, g.y(r.h0), g.base); if (p) el("path", {d: p, fill: "var(--s2)", ...po(r)}, g.marks); });
     g.addHover(tp);
   },
   fl(chart, s) {
     const d = s.days, f = frame(chart, 190, DOM.fl, ticks(DOM.fl, DOM.fl[1] - DOM.fl[0] > 3000 ? 1000 : 500), "", "Metres above sea level"), cx = i => f.x(i) + f.bw / 2;
-    // band drawn per run of consecutive days with data
-    let run = [];
-    const flush = () => { if (run.length > 1) el("path", {d: "M" + run.map(i => `${cx(i)},${f.y(d[i].flmax)}`).join("L") + "L" + run.slice().reverse().map(i => `${cx(i)},${f.y(d[i].flmin)}`).join("L") + "Z", fill: "var(--band)", opacity: .75}, f.marks); run = []; };
-    d.forEach((r, i) => { if (r && has(r.flmin) && has(r.flmax)) run.push(i); else flush(); }); flush();
-    el("path", {d: linePath(d.map((r, i) => r && has(r.flmean) ? [cx(i), f.y(r.flmean)] : null)), fill: "none", stroke: "var(--line)", "stroke-width": 2, "stroke-linejoin": "round"}, f.marks);
+    // observed and predicted parts are drawn separately; the predicted part starts at the last observed day so the curve stays connected
+    const bandOk = i => d[i] && has(d[i].flmin) && has(d[i].flmax), meanOk = i => d[i] && has(d[i].flmean);
+    const predPart = (ok, i) => ok(i) && (d[i].pred || (d[i + 1] && d[i + 1].pred && ok(i + 1)));
+    [false, true].forEach(pred => {
+      const pick = pred ? i => predPart(bandOk, i) : i => bandOk(i) && !d[i].pred;
+      runsOf(d.length, pick).forEach(run => { if (run.length > 1) el("path", {d: "M" + run.map(i => `${cx(i)},${f.y(d[i].flmax)}`).join("L") + "L" + run.slice().reverse().map(i => `${cx(i)},${f.y(d[i].flmin)}`).join("L") + "Z", fill: "var(--band)", opacity: .75 * (pred ? PRED_OPACITY : 1)}, f.marks); });
+      const mp = pred ? i => predPart(meanOk, i) : i => meanOk(i) && !d[i].pred;
+      el("path", {d: linePath(d.map((r, i) => mp(i) ? [cx(i), f.y(r.flmean)] : null)), fill: "none", stroke: "var(--line)", "stroke-width": 2, "stroke-linejoin": "round", opacity: pred ? PRED_OPACITY : 1}, f.marks);
+    });
     if (s.elev >= DOM.fl[0] && s.elev <= DOM.fl[1]) {
       el("line", {x1: f.m.l, x2: f.W - f.m.r, y1: f.y(s.elev), y2: f.y(s.elev), stroke: "var(--s2)", "stroke-width": 2, "stroke-dasharray": "5 4"}, f.marks);
       el("text", {x: f.W - f.m.r, y: f.y(s.elev) - 5, "text-anchor": "end", style: "fill:var(--text-secondary);font-weight:600;stroke:var(--surface-1);stroke-width:3px;paint-order:stroke"}, f.marks).textContent = nf0(s.elev) + "m";
     }
-    const tp = i => !d[i] ? noData(i) : `<b>${fmtW(DAYS[i])}</b>` + row("Min", nf0(d[i].flmin) + "m") + row("Mean", nf0(d[i].flmean) + "m") + row("Max", nf0(d[i].flmax) + "m") + row(`h 0 °C level < ${nf0(s.elev)}m`, `${nf0(d[i].fb)} / ${nf0(d[i].nh)}`) + row("h air ≤ 0 °C", `${nf0(d[i].hle0)} / ${nf0(d[i].nh)}`);
+    const tp = i => !d[i] ? noData(i) : `<b>${fmtW(DAYS[i])}${predTag(d[i])}</b>` + row("Min", nf0(d[i].flmin) + "m") + row("Mean", nf0(d[i].flmean) + "m") + row("Max", nf0(d[i].flmax) + "m") + row(`h 0 °C level < ${nf0(s.elev)}m`, `${nf0(d[i].fb)} / ${nf0(d[i].nh)}`) + row("h air ≤ 0 °C", `${nf0(d[i].hle0)} / ${nf0(d[i].nh)}`);
     f.addHover(tp);
     const g = frame(chart, 110, DOM.h, [0, 12, 24], "h", `Freezing hours at ${nf0(s.elev)}m`), w = Math.max(3, g.bw - 2);
     d.forEach((r, i) => { if (!r) return; const x = g.x(i) + (g.bw - w) / 2;
-      if (has(r.fb)) { const p = barPath(x, w, g.y(r.fb), g.base); if (p) el("path", {d: p, fill: "var(--s1)"}, g.marks); }
-      if (has(r.hle0)) el("rect", {x: x - 1, y: g.y(r.hle0) - 2.5, width: w + 2, height: 5, rx: 1.5, fill: "var(--s2)", stroke: "var(--surface-1)", "stroke-width": 1}, g.marks); });
+      if (has(r.fb)) { const p = barPath(x, w, g.y(r.fb), g.base); if (p) el("path", {d: p, fill: "var(--s1)", ...po(r)}, g.marks); }
+      if (has(r.hle0)) el("rect", {x: x - 1, y: g.y(r.hle0) - 2.5, width: w + 2, height: 5, rx: 1.5, fill: "var(--s2)", stroke: "var(--surface-1)", "stroke-width": 1, ...po(r)}, g.marks); });
     g.addHover(tp);
   },
   precip(chart, s) {
     const d = s.days, f = frame(chart, 180, DOM.precip, ticks(DOM.precip, DOM.precip[1] > 40 ? 20 : 10), "", "mm per day"), w = Math.max(3, f.bw - 2);
     d.forEach((r, i) => { if (!r || !has(r.p)) return; const x = f.x(i) + (f.bw - w) / 2;
-      if (!has(r.liq)) { const p = barPath(x, w, f.y(r.p), f.base); if (p) el("path", {d: p, fill: "var(--text-muted)"}, f.marks); return; }   // phase unknown
+      if (!has(r.liq)) { const p = barPath(x, w, f.y(r.p), f.base); if (p) el("path", {d: p, fill: "var(--text-muted)", ...po(r)}, f.marks); return; }   // phase unknown
       const sol = has(r.sol) ? r.sol : 0, yl = f.y(r.liq), yt = f.y(r.liq + sol);
-      if (r.liq > 0 && f.base - yl > .3) el("path", {d: sol > 0 ? `M${x},${f.base}V${yl}H${x + w}V${f.base}Z` : barPath(x, w, yl, f.base), fill: "var(--s1)"}, f.marks);
-      if (sol > 0) { const b = r.liq > 0 ? yl - 2 : f.base, p = barPath(x, w, Math.min(yt, b - 1), b); if (p) el("path", {d: p, fill: "var(--s3)"}, f.marks); } });
-    f.addHover(i => { const r = d[i]; if (!r) return noData(i); return `<b>${fmtW(DAYS[i])}</b>` + row("Total", nf1(r.p) + " mm") + row("Rain", nf1(r.liq) + " mm") + row("Snow (w.e.)", nf1(r.sol) + " mm") + (r.p > 0 && has(r.sol) ? row("Snow share", nf0(100 * r.sol / r.p) + " %") : ""); });
+      if (r.liq > 0 && f.base - yl > .3) el("path", {d: sol > 0 ? `M${x},${f.base}V${yl}H${x + w}V${f.base}Z` : barPath(x, w, yl, f.base), fill: "var(--s1)", ...po(r)}, f.marks);
+      if (sol > 0) { const b = r.liq > 0 ? yl - 2 : f.base, p = barPath(x, w, Math.min(yt, b - 1), b); if (p) el("path", {d: p, fill: "var(--s3)", ...po(r)}, f.marks); } });
+    f.addHover(i => { const r = d[i]; if (!r) return noData(i); return `<b>${fmtW(DAYS[i])}${predTag(r)}</b>` + row("Total", nf1(r.p) + " mm") + row("Rain", nf1(r.liq) + " mm") + row("Snow (w.e.)", nf1(r.sol) + " mm") + (r.p > 0 && has(r.sol) ? row("Snow share", nf0(100 * r.sol / r.p) + " %") : ""); });
   },
   night(chart, s) {
     const d = s.days, f = frame(chart, 160, DOM.night, ticks(DOM.night, 5), "h", "Night hours"), w = Math.max(3, f.bw - 2);
     d.forEach((r, i) => { if (!r) return; const x = f.x(i) + (f.bw - w) / 2; let acc = 0;
       const segs = [["clear", "var(--o1)"], ["partial", "var(--o2)"], ["cloudy", "var(--o3)"]].filter(([k]) => has(r[k]) && r[k] > 0);
       segs.forEach(([k, c], j) => { const yb = f.y(acc) - (acc > 0 ? 2 : 0), yt = f.y(acc + r[k]); acc += r[k];
-        if (yb - yt > .3) el("path", {d: j === segs.length - 1 ? barPath(x, w, yt, yb) : `M${x},${yb}V${yt}H${x + w}V${yb}Z`, fill: c, stroke: "var(--axis)", "stroke-width": .75}, f.marks); }); });
+        if (yb - yt > .3) el("path", {d: j === segs.length - 1 ? barPath(x, w, yt, yb) : `M${x},${yb}V${yt}H${x + w}V${yb}Z`, fill: c, stroke: "var(--axis)", "stroke-width": .75, ...po(r)}, f.marks); }); });
     f.addHover(i => { const r = d[i]; if (!r) return noData(i); const n = new Date(Date.parse(DAYS[i] + "T00:00Z") + 864e5).toISOString().slice(0, 10);
-      return `<b>Night ${fmtD(DAYS[i])} → ${fmtD(n)}</b>` + row("Clear", nf0(r.clear) + " h") + row("Partial", nf0(r.partial) + " h") + row("Cloudy", nf0(r.cloudy) + " h") + row("Mean cover", nf0(r.cc) + " %"); });
+      return `<b>Night ${fmtD(DAYS[i])} → ${fmtD(n)}${predTag(r)}</b>` + row("Clear", nf0(r.clear) + " h") + row("Partial", nf0(r.partial) + " h") + row("Cloudy", nf0(r.cloudy) + " h") + row("Mean cover", nf0(r.cc) + " %"); });
   }
 };
 
