@@ -12,7 +12,7 @@
 <body>
 <div class="viz-root">
 <div class="wrap">
-  <h1>Ice climbing watch: weather history for ice climbing sites</h1>
+  <h1>Ice climbing watch: weather data for ice climbing sites</h1>
   <p class="sub" id="sub">Loading data…</p>
   <div class="panel" id="loaderr" hidden style="border-color:var(--s2)"></div>
 
@@ -57,7 +57,7 @@
 
   <section id="sec-precip">
     <h2 class="s">Precipitation</h2>
-    <p class="desc">Daily total, split into rain and snow, mm. Shown at the <b>model's grid cell's altitude</b></p>
+    <p class="desc">Daily total, split into rain and snow, mm. Amounts computed at the <b>model's grid cell's altitude</b>, snow ratio adjusted for the altitude</p>
     <div class="legend"><span><i class="sw" style="background:var(--s1)"></i>Rain (mm)</span><span><i class="sw" style="background:var(--s3)"></i>Snow, water equivalent (mm)</span></div>
     <div class="grid" data-kind="precip"></div>
   </section>
