@@ -21,3 +21,7 @@ Gemfile.lock
 
 # Elevation tile cache for tools/build_basemap.py
 tools/.tiles/
+
+# Generated weather exports (not tracked)
+data/v_series_daily_21d.csv
+data/v_series_summary_21d.csv
